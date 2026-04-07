@@ -8,6 +8,11 @@ import type {
   FetchResult,
   Registry,
 } from "../types.js";
+import {
+  getTokenForHost,
+  getAuthenticatedCloneUrl,
+  formatCloneError,
+} from "./auth.js";
 
 const OPENSRC_DIR = "opensrc";
 const REPOS_DIR = "repos";
@@ -264,9 +269,9 @@ export async function fetchSource(
 ): Promise<FetchResult> {
   const git = simpleGit();
 
-  // Get repo display name from URL
-  const repoDisplayName = getRepoDisplayName(resolved.repoUrl);
-  if (!repoDisplayName) {
+  // Get repo info from URL
+  const parsed = parseRepoUrl(resolved.repoUrl);
+  if (!parsed) {
     return {
       package: resolved.name,
       version: resolved.version,
@@ -276,6 +281,14 @@ export async function fetchSource(
       registry: resolved.registry,
     };
   }
+
+  const repoDisplayName = `${parsed.host}/${parsed.owner}/${parsed.repo}`;
+
+  // Resolve auth token for private repo support
+  const token = await getTokenForHost(parsed.host);
+  const cloneUrl = token
+    ? getAuthenticatedCloneUrl(resolved.repoUrl, token)
+    : resolved.repoUrl;
 
   const repoPath = getRepoPath(repoDisplayName, cwd);
   const reposDir = getReposDir(cwd);
@@ -299,7 +312,7 @@ export async function fetchSource(
   // Clone the repository
   const cloneResult = await cloneAtTag(
     git,
-    resolved.repoUrl,
+    cloneUrl,
     repoPath,
     resolved.version,
   );
@@ -310,7 +323,7 @@ export async function fetchSource(
       version: resolved.version,
       path: getRepoRelativePath(repoDisplayName),
       success: false,
-      error: cloneResult.error,
+      error: formatCloneError(cloneResult.error, token, parsed.host),
       registry: resolved.registry,
     };
   }
@@ -345,6 +358,13 @@ export async function fetchRepoSource(
   cwd: string = process.cwd(),
 ): Promise<FetchResult> {
   const git = simpleGit();
+
+  // Resolve auth token for private repo support
+  const token = await getTokenForHost(resolved.host);
+  const cloneUrl = token
+    ? getAuthenticatedCloneUrl(resolved.repoUrl, token)
+    : resolved.repoUrl;
+
   const repoPath = getRepoPath(resolved.displayName, cwd);
   const reposDir = getReposDir(cwd);
 
@@ -367,7 +387,7 @@ export async function fetchRepoSource(
   // Clone the repository
   const cloneResult = await cloneAtRef(
     git,
-    resolved.repoUrl,
+    cloneUrl,
     repoPath,
     resolved.ref,
   );
@@ -378,7 +398,7 @@ export async function fetchRepoSource(
       version: resolved.ref,
       path: getRepoRelativePath(resolved.displayName),
       success: false,
-      error: cloneResult.error,
+      error: formatCloneError(cloneResult.error, token, resolved.host),
     };
   }
 

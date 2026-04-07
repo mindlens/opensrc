@@ -1,4 +1,9 @@
 import type { RepoSpec, ResolvedRepo } from "../types.js";
+import {
+  getGitHubToken,
+  getGitLabToken,
+  getAuthHelpMessage,
+} from "./auth.js";
 
 // Supported git hosts
 const SUPPORTED_HOSTS = ["github.com", "gitlab.com", "bitbucket.org"];
@@ -196,25 +201,30 @@ async function resolveGitHubRepo(
   ref?: string,
 ): Promise<ResolvedRepo> {
   const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+  const token = await getGitHubToken();
 
-  const response = await fetch(apiUrl, {
-    headers: {
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "opensrc-cli",
-    },
-  });
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.v3+json",
+    "User-Agent": "opensrc-cli",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(apiUrl, { headers });
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new Error(
-        `Repository "${owner}/${repo}" not found on GitHub. ` +
-          `Make sure it exists and is public.`,
-      );
+      const message = token
+        ? `Repository "${owner}/${repo}" not found on GitHub. Check the name and that your token has access.`
+        : `Repository "${owner}/${repo}" not found on GitHub. If it's private:\n${getAuthHelpMessage("github.com")}`;
+      throw new Error(message);
     }
     if (response.status === 403) {
-      throw new Error(
-        `GitHub API rate limit exceeded. Try again later or authenticate.`,
-      );
+      const message = token
+        ? `GitHub API request forbidden. Your token may lack sufficient permissions for "${owner}/${repo}".`
+        : `GitHub API rate limit exceeded. Try again later or authenticate:\n${getAuthHelpMessage("github.com")}`;
+      throw new Error(message);
     }
     throw new Error(
       `Failed to fetch repository info: ${response.status} ${response.statusText}`,
@@ -242,19 +252,23 @@ async function resolveGitLabRepo(
 ): Promise<ResolvedRepo> {
   const projectPath = encodeURIComponent(`${owner}/${repo}`);
   const apiUrl = `https://gitlab.com/api/v4/projects/${projectPath}`;
+  const token = await getGitLabToken();
 
-  const response = await fetch(apiUrl, {
-    headers: {
-      "User-Agent": "opensrc-cli",
-    },
-  });
+  const headers: Record<string, string> = {
+    "User-Agent": "opensrc-cli",
+  };
+  if (token) {
+    headers["PRIVATE-TOKEN"] = token;
+  }
+
+  const response = await fetch(apiUrl, { headers });
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new Error(
-        `Repository "${owner}/${repo}" not found on GitLab. ` +
-          `Make sure it exists and is public.`,
-      );
+      const message = token
+        ? `Repository "${owner}/${repo}" not found on GitLab. Check the name and that your token has access.`
+        : `Repository "${owner}/${repo}" not found on GitLab. If it's private:\n${getAuthHelpMessage("gitlab.com")}`;
+      throw new Error(message);
     }
     throw new Error(
       `Failed to fetch repository info: ${response.status} ${response.statusText}`,
